@@ -1,112 +1,111 @@
-from flask import Flask, request, render_template_string
+import os
+from flask import Flask, request, redirect, session, render_template_string
 import spotipy
 from spotipy.oauth2 import SpotifyOAuth
-import os
-import re
 
-CLIENT_ID = os.getenv("SPOTIPY_CLIENT_ID")
-CLIENT_SECRET = os.getenv("SPOTIPY_CLIENT_SECRET")
-REDIRECT_URI = os.getenv("SPOTIPY_REDIRECT_URI")  # trebuie HTTPS pe Heroku
+app = Flask(__name__)
+app.secret_key = "supersecretkey123"  # oricât, doar pentru sesiune
+app.config['SESSION_COOKIE_NAME'] = 'spotify-login-session'
+
+# Spotify Config
+SPOTIPY_CLIENT_ID = os.getenv("SPOTIPY_CLIENT_ID")
+SPOTIPY_CLIENT_SECRET = os.getenv("SPOTIPY_CLIENT_SECRET")
+SPOTIPY_REDIRECT_URI = os.getenv("SPOTIPY_REDIRECT_URI")
 
 SCOPE = "playlist-modify-public playlist-modify-private"
 
-sp = spotipy.Spotify(auth_manager=SpotifyOAuth(
-    client_id=CLIENT_ID,
-    client_secret=CLIENT_SECRET,
-    redirect_uri=REDIRECT_URI,
+sp_oauth = SpotifyOAuth(
+    client_id=SPOTIPY_CLIENT_ID,
+    client_secret=SPOTIPY_CLIENT_SECRET,
+    redirect_uri=SPOTIPY_REDIRECT_URI,
     scope=SCOPE
-))
+)
 
-app = Flask(__name__)
-tracks_cache = []
-playlist_id_cache = None
-
-def extrage_playlist_id(link):
-    if not link:
-        return None
-    if "open.spotify.com" in link:
-        m = re.search(r"playlist/([a-zA-Z0-9]+)", link)
-        if m:
-            return m.group(1)
-    if link.startswith("spotify:playlist:"):
-        return link.split(":")[-1]
-    return None
-
-HTML = """
+# Simple HTML template
+HTML_PAGE = """
 <!doctype html>
-<html>
-<head>
-<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Spotify Playlist Adder</title>
-<style>
-body { font-family: Arial; background:#121212; color:white; padding:20px; }
-input, button { width:100%; padding:12px; margin:8px 0; font-size:16px; }
-button { background:#1DB954; border:none; color:black; font-weight:bold; }
-.card { background:#1e1e1e; padding:10px; margin:8px 0; border-radius:6px; }
-</style>
-</head>
-<body>
-
-<h2>Spotify Playlist Adder</h2>
-
+<h2>Adaugă melodie în playlist</h2>
+{% if message %}
+<p style="color:red;">{{ message }}</p>
+{% endif %}
 <form method="post">
-<input name="playlist" placeholder="Link playlist Spotify" required>
-<input name="query" placeholder="Caută melodie">
-<button name="action" value="search">Caută</button>
+  Link playlist:<br>
+  <input type="text" name="playlist_url" size="50" required><br><br>
+  Nume melodie:<br>
+  <input type="text" name="track_name" size="50" required><br><br>
+  <input type="submit" value="Caută și Adaugă">
 </form>
 
-{% for i, t in tracks %}
-<div class="card">
-<b>{{ i }}.</b> {{ t.name }} - {{ t.artists }}
+{% if results %}
+<h3>Rezultate:</h3>
 <form method="post">
-<input type="hidden" name="track_uri" value="{{ t.uri }}">
-<button name="action" value="add">Adaugă</button>
-</form>
-</div>
+{% for idx, track in enumerate(results) %}
+  <input type="radio" name="choice" value="{{ idx }}" required>
+  {{ idx+1 }}. {{ track['name'] }} - {{ track['artists'][0]['name'] }}<br>
 {% endfor %}
+<input type="hidden" name="playlist_url" value="{{ playlist_url }}">
+<input type="submit" value="Adaugă melodia aleasă">
+</form>
+{% endif %}
 
-<p>{{ message }}</p>
-</body>
-</html>
+{% if success %}
+<p style="color:green;">{{ success }}</p>
+{% endif %}
 """
 
 @app.route("/", methods=["GET", "POST"])
 def index():
-    global tracks_cache, playlist_id_cache
-    message = ""
-    tracks = []
+    token_info = session.get("token_info", None)
+    if not token_info:
+        auth_url = sp_oauth.get_authorize_url()
+        return redirect(auth_url)
 
+    sp = spotipy.Spotify(auth=token_info["access_token"])
+
+    # Refresh token dacă e nevoie
+    if sp_oauth.is_token_expired(token_info):
+        token_info = sp_oauth.refresh_access_token(token_info['refresh_token'])
+        session["token_info"] = token_info
+        sp = spotipy.Spotify(auth=token_info["access_token"])
+
+    message = None
+    results = None
+    success = None
+    playlist_url = ""
+
+    # POST pentru căutare melodie
     if request.method == "POST":
-        playlist_link = request.form.get("playlist")
-        playlist_id = extrage_playlist_id(playlist_link)
+        playlist_url = request.form.get("playlist_url")
+        track_name = request.form.get("track_name")
+        choice = request.form.get("choice")
 
-        if not playlist_id:
-            message = "❌ Link playlist invalid"
-        else:
-            playlist_id_cache = playlist_id
+        try:
+            # Dacă alegere din lista de rezultate
+            if choice is not None:
+                idx = int(choice)
+                track_uri = session["last_results"][idx]["uri"]
+                sp.playlist_add_items(playlist_url.split("/")[-1], [track_uri])
+                success = f"Melodia '{session['last_results'][idx]['name']}' a fost adăugată!"
+                session.pop("last_results")
+            elif track_name:
+                search_results = sp.search(q=track_name, type="track", limit=5)
+                results = search_results['tracks']['items']
+                if not results:
+                    message = "Nu am găsit melodii cu acest nume."
+                else:
+                    session["last_results"] = results
+        except Exception as e:
+            message = f"Eroare: {str(e)}"
 
-            if request.form["action"] == "search":
-                query = request.form.get("query", "")
-                results = sp.search(q=query, type="track", limit=5)
-                tracks_cache = results["tracks"]["items"]
+    return render_template_string(HTML_PAGE, message=message, results=results, success=success, playlist_url=playlist_url)
 
-            elif request.form["action"] == "add":
-                uri = request.form.get("track_uri")
-                sp.playlist_add_items(playlist_id_cache, [uri])
-                message = "✅ Melodia a fost adăugată!"
-
-    for i, t in enumerate(tracks_cache, start=1):
-        tracks.append({
-            "name": t["name"],
-            "artists": ", ".join(a["name"] for a in t["artists"]),
-            "uri": t["uri"]
-        })
-
-    return render_template_string(
-        HTML,
-        tracks=list(enumerate(tracks, 1)),
-        message=message
-    )
+@app.route("/callback")
+def callback():
+    code = request.args.get("code")
+    token_info = sp_oauth.get_access_token(code)
+    session["token_info"] = token_info
+    return redirect("/")
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
