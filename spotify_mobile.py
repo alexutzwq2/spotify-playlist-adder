@@ -4,10 +4,10 @@ import spotipy
 from spotipy.oauth2 import SpotifyOAuth
 
 app = Flask(__name__)
-app.secret_key = "supersecretkey123"  # oricât, doar pentru sesiune
+app.secret_key = "supersecretkey123"  # secret pentru sesiuni
 app.config['SESSION_COOKIE_NAME'] = 'spotify-login-session'
 
-# Spotify Config
+# Config Spotify
 SPOTIPY_CLIENT_ID = os.getenv("SPOTIPY_CLIENT_ID")
 SPOTIPY_CLIENT_SECRET = os.getenv("SPOTIPY_CLIENT_SECRET")
 SPOTIPY_REDIRECT_URI = os.getenv("SPOTIPY_REDIRECT_URI")
@@ -21,7 +21,7 @@ sp_oauth = SpotifyOAuth(
     scope=SCOPE
 )
 
-# Simple HTML template
+# HTML simplu
 HTML_PAGE = """
 <!doctype html>
 <title>Spotify Playlist Adder</title>
@@ -63,7 +63,7 @@ def index():
 
     sp = spotipy.Spotify(auth=token_info["access_token"])
 
-    # Refresh token dacă e nevoie
+    # Refresh token dacă expiră
     if sp_oauth.is_token_expired(token_info):
         token_info = sp_oauth.refresh_access_token(token_info['refresh_token'])
         session["token_info"] = token_info
@@ -74,18 +74,17 @@ def index():
     success = None
     playlist_url = ""
 
-    # POST pentru căutare melodie
     if request.method == "POST":
         playlist_url = request.form.get("playlist_url")
         track_name = request.form.get("track_name")
         choice = request.form.get("choice")
 
         try:
-            # Dacă alegere din lista de rezultate
             if choice is not None:
                 idx = int(choice)
                 track_uri = session["last_results"][idx]["uri"]
-                sp.playlist_add_items(playlist_url.split("/")[-1], [track_uri])
+                playlist_id = playlist_url.split("/")[-1].split("?")[0]  # ia doar id-ul playlist
+                sp.playlist_add_items(playlist_id, [track_uri])
                 success = f"Melodia '{session['last_results'][idx]['name']}' a fost adăugată!"
                 session.pop("last_results")
             elif track_name:
