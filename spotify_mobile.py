@@ -57,6 +57,10 @@ HTML_PAGE = """
 @app.route("/", methods=["GET", "POST"])
 def index():
     token_info = session.get("token_info", None)
+
+    # 🔹 Debug: vezi tokenul în Logs Render
+    print("Token info in session:", token_info)
+
     if not token_info:
         auth_url = sp_oauth.get_authorize_url()
         return redirect(auth_url)
@@ -104,14 +108,9 @@ def callback():
     code = request.args.get("code")
     token_info = sp_oauth.get_access_token(code)
     session["token_info"] = token_info
+    # 🔹 Debug: vezi token după callback
+    print("Token after callback:", token_info)
     return redirect("/")
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
-
-@app.route("/")
-def index():
-    token_info = session.get("token_info")
-    print("Token info:", token_info)
-    ...
-
