@@ -40,7 +40,7 @@ HTML_PAGE = """
 {% if results %}
 <h3>Rezultate:</h3>
 <form method="post">
-{% for idx, track in enumerate(results) %}
+{% for idx, track in results %}
   <input type="radio" name="choice" value="{{ idx }}" required>
   {{ idx+1 }}. {{ track['name'] }} - {{ track['artists'][0]['name'] }}<br>
 {% endfor %}
@@ -58,7 +58,7 @@ HTML_PAGE = """
 def index():
     token_info = session.get("token_info", None)
 
-    # 🔹 Debug: vezi tokenul în Logs Render
+    # 🔹 Debug: vezi token în Logs Render
     print("Token info in session:", token_info)
 
     if not token_info:
@@ -87,7 +87,7 @@ def index():
             if choice is not None:
                 idx = int(choice)
                 track_uri = session["last_results"][idx]["uri"]
-                playlist_id = playlist_url.split("/")[-1].split("?")[0]  # ia doar id-ul playlist
+                playlist_id = playlist_url.split("/")[-1].split("?")[0]
                 sp.playlist_add_items(playlist_id, [track_uri])
                 success = f"Melodia '{session['last_results'][idx]['name']}' a fost adăugată!"
                 session.pop("last_results")
@@ -101,7 +101,16 @@ def index():
         except Exception as e:
             message = f"Eroare: {str(e)}"
 
-    return render_template_string(HTML_PAGE, message=message, results=results, success=success, playlist_url=playlist_url)
+    # 🔹 Creăm listă (index, track) pentru Jinja
+    results_with_index = list(enumerate(results)) if results else None
+
+    return render_template_string(
+        HTML_PAGE,
+        message=message,
+        results=results_with_index,
+        success=success,
+        playlist_url=playlist_url
+    )
 
 @app.route("/callback")
 def callback():
