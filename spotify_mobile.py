@@ -108,3 +108,10 @@ def callback():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
+
+@app.route("/")
+def index():
+    token_info = session.get("token_info")
+    print("Token info:", token_info)
+    ...
+
